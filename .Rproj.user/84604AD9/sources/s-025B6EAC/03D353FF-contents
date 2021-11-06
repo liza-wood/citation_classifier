@@ -1,0 +1,3 @@
+# Citation classifier
+
+A draft workflow that takes PDF documents as inputs, and outputs a data table of their citations, cleaned and classified into academic journals, government agency reports, etc. The stages of the workflow incude unlisting [AnyStyle.io](https://anystyle.io/) bibliographic data, disambiguating journal names, and predicting citation type based on a pre-trained classifier (ongoing). Forthcoming steps include further disambiguation of journal names through string distance matching and utilization of exact citation matching tools including citationsearch() package, Web of Science API, etc.
