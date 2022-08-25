@@ -3,10 +3,10 @@ library(stringr)
 library(data.table)
 library(tools)
 library(tidyverse)
-source("functions.R")
-setwd("~/Box/citation_classifier/")
+source("~/Documents/Davis/R-Projects/citation_classifier/script/functions.R")
 
-anystyle <- readRDS('data/gsp_references.RDS')
+setwd("~/Box/citation_classifier/")
+anystyle <- readRDS('data/trial1_references.RDS')
 df <- anystyle %>% 
   rename("container" = "container-title")
 
@@ -25,19 +25,19 @@ pub_match_journal <- df$publisher %in% scimago.j$title
 container_match_conf <- df$container %in% scimago.c$title
 pub_match_conf <- df$publisher %in% scimago.c$title
 
-table(container_match_journal) # 24
-table(pub_match_journal) # 1
+# Truth is 27 in Hekkert and 14 in doc = 41 citations; 
+## 4 govt report (2 European), 1 NGO report, 3 books and 
+table(container_match_journal) # 7 of 33 known
+table(pub_match_journal) # 0
 table(container_match_conf) # 0
 table(pub_match_conf) # 0
 
 ## Let's also pull in our official agency list
-agencies <- fread("~/Box/truckee/data/eia_data/agency_list.csv", fill = T)
-
 container_match_agency <- df$container %in% agencies$Agency 
 pub_match_agency <- df$publisher %in% agencies$Agency 
 author_match_agency <- df$author %in% agencies$Agency 
-table(container_match_agency) # 2
-table(pub_match_agency) # 3
+table(container_match_agency) # 0
+table(pub_match_agency) # 0
 table(author_match_agency) # 0
 
 # Don't do patterns for now because this coerces it into a string
@@ -100,12 +100,11 @@ MAX <- max(c(max(df$container.lengths), max(df$publisher.lengths), max(df$title.
 # Sticking with this as the cutoff, in case dates or something get out of control
 TITLE_MAX <- max(df$title.lengths)
 
-df <- df %>% filter(date.lengths < TITLE_MAX,
-                    url.lengths < TITLE_MAX,
-                    container.lengths < TITLE_MAX,
-                    publisher.lengths < TITLE_MAX,
-                    doi.lengths < TITLE_MAX)
-# This hardly reduces the number but it makes life a little easier
+df <- df %>% filter(date.lengths <= TITLE_MAX,
+                    url.lengths <= TITLE_MAX,
+                    container.lengths <= TITLE_MAX,
+                    publisher.lengths <= TITLE_MAX,
+                    doi.lengths <= TITLE_MAX)
 
 ### Look for congruent cases for mashed up citations ----
 
@@ -123,45 +122,28 @@ table(match.test$nested)
 df <- left_join(df, match.test, by = "ID")
 
 # DATE ----
+if(max(df$date.lengths) > 1){
 df <- separate(df, date, 
                into =  paste0("date",seq(1:max(df$date.lengths))), 
                sep = '\\"\\,\\s\\"')
-
 df$date1 <- str_remove(df$date1, 'c\\(\\"')
 
 date.cols <- grep("date\\d+", colnames(df))
-# This does not work: df[,date.cols]
-# These are correct, but don't work in an apply function
+# Need to make a df to be able to hard code date cols into subset
 df <- data.frame(df)
 last <- length(df[,date.cols])
-MAX_DATE_OLD <- colnames(df[,date.cols])[last]
-
-# For now I will use this, but it is hardcoded
+MAX_DATE_OG <- colnames(df[,date.cols])[last]
 df[,date.cols] <- lapply(df[,date.cols], rpl.sep)
 
 ## Isolate year only for all dates ----
-
 ### Have to pull out dates if they are embedded in some other weird string of numbers
-
-yrs <- function(x){
-  trimws(str_extract(x, date.formats))
-}
-
 df[,date.cols] <- lapply(df[,date.cols], yrs) 
 
 ### Pull out just year based on different date formats
-
 df[,date.cols] <- lapply(df[,date.cols], assignyear)
 
 ## Additional date cleaning before nested consideration ----
 ### Remove dates that are unreasonable
-
-rm.yrs <- function(x){
-  ifelse(x < 1850 | 
-           x > 2020, NA,
-         x)
-}
-
 df[,date.cols] <- lapply(df[,date.cols], rm.yrs)
 
 # Make numeric
@@ -170,7 +152,7 @@ df[,date.cols] <- lapply(df[,date.cols], as.numeric)
 ## Removing duplicate and NA dates ----
 # Needs hard coded for max number of columns
 date.df <- df %>% 
-  filter(!(is.na(date1) & is.na(date2) & is.na(date3))) %>% 
+  filter(!(is.na(date1) & is.na(date2))) %>% 
   select(ID, all_of(date.cols)) %>% 
   pivot_longer(cols = grep("date\\d+", colnames(.)), 
                names_to = "date.number",
@@ -193,7 +175,6 @@ out <- out %>%
 date.cols <- grep("date\\d+", colnames(out))
 last <- length(out[,date.cols])
 MAX_DATE <- colnames(out[,date.cols])[last]
-MAX_DATE
 
 out$date.lengths = NA
 for(i in 1:nrow(out)){
@@ -209,7 +190,6 @@ for(i in 1:nrow(out)){
 out$date.lengths <- ifelse(is.na(out$date.lengths), length(date.cols), 
                            out$date.lengths)
 
-
 ## Collapsing columns into lists again ----
 
 run.df <- out %>% filter(date.lengths > 1)
@@ -219,13 +199,12 @@ colnames(string.DT) <- c("year", "ID")
 
 # Bind back the information from out, and the year information from run.df, and assign year values for those not in run.df
 df <- df %>% 
-  select(-c(date1:MAX_DATE_OLD), -date.lengths) %>% 
+  select(-c(date1:MAX_DATE_OG), -date.lengths) %>% 
   left_join(out, by = "ID") %>% 
   mutate(date.lengths = case_when(
     is.na(date.lengths) ~ 0,
     T ~ as.double(date.lengths))) %>% 
   left_join(string.DT, by = "ID") 
-
 
 df$year <- ifelse(df$date.lengths == 0, NA,
                   ifelse(df$date.lengths == 1, df$date1, df$year))
@@ -239,24 +218,20 @@ out <- pmap_dfr(list(x, y), index.lengths)
 colnames(out)[1] <- "date.lengths"
 df <- left_join(df, out, by = "ID")
 table(df$date.lengths)
-
+}
 # 3. Clean up URL formatting to better understand list length ----
 
 ## Separating to multiple urls
+if(max(df$url.lengths) > 1){
 df <- separate(df, url, 
                into = paste0("url",seq(1:max(df$url.lengths))), 
                sep = '\\"\\,\\s\\"')
 
 df$url1 <- str_remove(df$url1, 'c\\(\\"')
-
-# DT is very finnicky with subsetting this way, and I cannot get it to work in an apply function
 url.cols <- grep("url\\d+", colnames(df))
 last <- length(df[,url.cols])
-MAX_URL_OLD <- colnames(df[,url.cols])[last]
-
-# For now I will use this, but it is hardcoded
+MAX_URL_OG <- colnames(df[,url.cols])[last]
 df[,url.cols] <- lapply(df[,url.cols], rpl.sep)
-
 
 ## Additional cleaning for non-urls ----
 
@@ -310,7 +285,6 @@ out <- out %>%
 url.cols <- grep("url\\d+", colnames(out))
 last <- length(out[,url.cols])
 MAX_URL <- colnames(out[,url.cols])[last]
-MAX_URL
 
 out$url.lengths = NA
 for(i in 1:nrow(out)){
@@ -333,10 +307,9 @@ run.df <- out %>% filter(url.lengths > 1)
 string.DT <- collapse_url(run.df)
 colnames(string.DT) <- c("url", "ID")
 
-
 # Bind back the information from out, and the url information from run.df, and assign year values for those not in run.df
 df <- df %>% 
-  select(-c(url1:MAX_URL_OLD), -url.lengths) %>% 
+  select(-c(url1:MAX_URL_OG), -url.lengths) %>% 
   left_join(out, by = "ID") %>% 
   mutate(url.lengths = case_when(
     is.na(url.lengths) ~ 0,
@@ -357,54 +330,30 @@ out <- pmap_dfr(list(x, y), index.lengths)
 colnames(out)[1] <- "url.lengths"
 df <- left_join(df, out, by = "ID")
 table(df$url.lengths)
-
+}
 # 4. Clean up TITLE formatting to better understand list length ----
 ## Separating to multiple urls ----
+if(max(df$title.lengths) > 1){
 df <- separate(df, title, 
                into = paste0("title",seq(1:max(df$title.lengths))), 
                sep = '\\"\\,\\s\\"')
-
 df$title1 <- str_remove(df$title1, 'c\\(\\"')
-
-# DT is very finnicky with subsetting this way, and I cannot get it to work in an apply function
 title.cols <- grep("title\\d+", colnames(df))
 last <- length(df[,title.cols])
-MAX_TITLE_OLD <- colnames(df[,title.cols])[last]
-
+MAX_TITLE_OG <- colnames(df[,title.cols])[last]
 df[,title.cols] <- lapply(df[,title.cols], rpl.sep)
 
 ## Additional cleaning for non-urls ----
-org.words <- c("Administration", "Agency", "Association", "Associates", "Authority",  "Board", "Bureau", "Center", "^Consult[a-z]+$",  "Commission", "Council",  "Department", "Foundation", "Government[s]*", "LLC",  "Forest Service", "Geological Survey", "Society", "Univeristy", "\\bU.?S.?D.?A.?", "\\bU.?S.?F.?W.?", "\\bU.?S.?G.?S.?", "\\bU.?S.?E.?P.?A.?")
-org.words <- paste(org.words, collapse = "|")
-agency.pattern <- paste(agencies$Agency, collapse = "\\b|\\b")
-
-extract.agency.titles <- function(x){
-  data.frame(
-    agency.in.title = ifelse(str_detect(x, org.words) | 
-                               str_detect(x, agency.pattern), 
-                             x, NA),
-    ID = y)
-}
 
 agency.titles <- data.frame(lapply(df[,title.cols], extract.agency.titles))
-table(is.na(agency.titles$title1.agency.in.title))
-
-rm.patterns <- c("[Pp]ersonal [Cc]ommunication:?",
-                 "^\\d*$"# only digits
-)
-rm.patterns <- paste(rm.patterns, collapse = "|")
-
-rm.agency.titles <- function(x){
-  ifelse(str_detect(x, org.words) | str_detect(x, agency.pattern) |
-           str_detect(x, rm.patterns) | nchar(x) < 10 | nchar(x) > 250, NA, x)
+if(sum(!is.na(agency.titles$title1.agency.in.title)) > 0){
+  df[,title.cols] <- lapply(df[,title.cols], rm.agency.titles)
 }
-
-df[,title.cols] <- lapply(df[,title.cols], rm.agency.titles)
 
 ## Removing duplicates and NAs ----
 
 title.df <- df %>% 
-  filter(!(is.na(title1) & is.na(title2) & is.na(title3))) %>% 
+  filter(!(is.na(title1) & is.na(title2))) %>% 
   select(ID, all_of(title.cols)) %>% 
   pivot_longer(cols = grep("title\\d+", colnames(.)), 
                names_to = "title.number",
@@ -425,7 +374,6 @@ out <- out %>%
 title.cols <- grep("title\\d+", colnames(out))
 last <- length(out[,title.cols])
 MAX_TITLE <- colnames(out[,title.cols])[last]
-MAX_TITLE
 
 out$title.lengths = NA
 for(i in 1:nrow(out)){
@@ -450,7 +398,7 @@ colnames(string.DT) <- c("title", "ID")
 
 # Bind them
 df <- df %>% 
-  select(-c(title1:MAX_TITLE_OLD), -title.lengths) %>% 
+  select(-c(title1:MAX_TITLE_OG), -title.lengths) %>% 
   left_join(out, by = "ID") %>% 
   mutate(title.lengths = case_when(
     is.na(title.lengths) ~ 0,
@@ -464,14 +412,14 @@ df <- df %>%
   select(-c(title1:MAX_TITLE), -title.lengths)
 
 # Re-count lengths
-
 x = select(df, title)
 out <- pmap_dfr(list(x, y), index.lengths)
 colnames(out)[1] <- "title.lengths"
 df <- left_join(df, out, by = "ID")
-
+}
 
 # 5. CONTAINER  ----
+if(max(df$container.lengths) > 1){
 df <- separate(df, container, into = 
                  paste0("container",seq(1:max(df$container.lengths))), sep = '\\"\\,\\s\\"')
 
@@ -479,7 +427,7 @@ df$container1 <- str_remove(df$container1, 'c\\(\\"')
 
 container.cols <- grep("container\\d+", colnames(df))
 last <- length(df[,container.cols])
-MAX_CONTAINER_OLD <- colnames(df[,container.cols])[last]
+MAX_CONTAINER_OG <- colnames(df[,container.cols])[last]
 
 df[,container.cols] <- lapply(df[,container.cols], rpl.sep)
 
@@ -533,7 +481,7 @@ colnames(string.DT) <- c("container", "ID")
 
 # Bind them
 df <- df %>% 
-  select(-c(container1:MAX_CONTAINER_OLD), -container.lengths) %>% 
+  select(-c(container1:MAX_CONTAINER_OG), -container.lengths) %>% 
   left_join(out, by = "ID") %>% 
   mutate(container.lengths = case_when(
     is.na(container.lengths) ~ 0,
@@ -552,8 +500,9 @@ x = select(df, container)
 out <- pmap_dfr(list(x, y), index.lengths)
 colnames(out)[1] <- "container.lengths"
 df <- left_join(df, out, by = "ID")
-
+}
 # 6. PUBLISHER  ----
+if(max(df$publisher.lengths) > 1){
 df <- separate(df, publisher, 
                into = paste0("publisher",seq(1:max(df$publisher.lengths))), 
                sep = '\\"\\,\\s\\"')
@@ -636,23 +585,19 @@ x = select(df, publisher)
 out <- pmap_dfr(list(x, y), index.lengths)
 colnames(out)[1] <- "publisher.lengths"
 df <- left_join(df, out, by = "ID")
-
+}
 
 # DOI----
-
+if(max(df$doi.lengths) > 1){
 ## Separating to multiple dois
 df <- separate(df, doi, 
                into = paste0("doi",seq(1:max(df$doi.lengths))), 
                sep = '\\"\\,\\s\\"')
-
 df$doi1 <- str_remove(df$doi1, 'c\\(\\"')
 
-# DT is very finnicky with subsetting this way, and I cannot get it to work in an apply function
 doi.cols <- grep("doi\\d+", colnames(df))
 last <- length(df[,doi.cols])
-MAX_DOI_OLD <- colnames(df[,doi.cols])[last]
-
-# For now I will use this, but it is hardcoded
+MAX_DOI_OG <- colnames(df[,doi.cols])[last]
 df[,doi.cols] <- lapply(df[,doi.cols], rpl.sep)
 
 # Identify the doi pattern, maybe starting with 10.
@@ -714,7 +659,7 @@ colnames(string.DT) <- c("doi", "ID")
 
 # Bind back the information from out, and the doi information from run.df, and assign year values for those not in run.df
 df <- df %>% 
-  select(-c(doi1:MAX_DOI_OLD), -doi.lengths) %>% 
+  select(-c(doi1:MAX_DOI_OG), -doi.lengths) %>% 
   left_join(out, by = "ID") %>% 
   mutate(doi.lengths = case_when(
     is.na(doi.lengths) ~ 0,
@@ -735,7 +680,7 @@ out <- pmap_dfr(list(x, y), index.lengths)
 colnames(out)[1] <- "doi.lengths"
 df <- left_join(df, out, by = "ID")
 table(df$doi.lengths)
-
+}
 
 
 # AUTHOR ----
@@ -862,6 +807,7 @@ run.df <- df %>% filter(nested == "tu_even_unn" | nested == "ty_even_unn")
 paste.df <- anti_join(df, run.df)
 
 # Go ahead and collapse authors before unnesting 
+if(nrow(run.df) > 0){
 run.df[,2] <- apply(run.df[,2], 1, function(x) paste(unlist(x), collapse=', '))
 
 run.un <- data.table()
@@ -892,16 +838,17 @@ nested = paste.df[,nested]
 paste.un <- pmap_dfr(list(id, auth, yr, ti, c, p, doi, url, File, nested), collpse)
 
 df <- rbind(run.un, paste.un) %>% select(-nested)
+}
 df$ID <- 1:nrow(df)
 
-df$title <- iconv(df$title, from = "latin1", to = "ASCII", sub = "") 
 df$title <- str_squish(df$title)
-df$container <- iconv(df$container, from = "latin1", to = "ASCII", sub = "") 
+df$title <- iconv(df$title, from = "latin1", to = "ASCII", sub = "") 
 df$container <- str_squish(df$container)
-df$publisher <- iconv(df$publisher, from = "latin1", to = "ASCII", sub = "") 
+df$container <- iconv(df$container, from = "latin1", to = "ASCII", sub = "") 
 df$publisher <- str_squish(df$publisher)
-df$author <- iconv(df$author, from = "latin1", to = "ASCII", sub = "") 
+df$publisher <- iconv(df$publisher, from = "latin1", to = "ASCII", sub = "") 
 df$author <- str_squish(df$author)
+df$author <- iconv(df$author, from = "latin1", to = "ASCII", sub = "") 
 
 df <- df %>% 
   mutate(container = trimws(toTitleCase(str_remove_all(container, 
@@ -932,35 +879,25 @@ pub_match_journal <- df$publisher %in% scimago.j$title
 container_match_conf <- df$container %in% scimago.c$title
 pub_match_conf <- df$publisher %in% scimago.c$title
 
-table(container_match_journal) # 24 now 29
-table(pub_match_journal) # 1 still 1
-table(container_match_conf) # 0 still 0
-table(pub_match_conf) # 0 still 0
+table(container_match_journal) # still 7
+table(pub_match_journal) # still 0
+table(container_match_conf) # still 0
+table(pub_match_conf) # still 0
 
 container_match_agency <- df$container %in% agencies$Agency 
 pub_match_agency <- df$publisher %in% agencies$Agency 
 author_match_agency <- df$author %in% agencies$Agency 
-table(container_match_agency) # 2 still 2
-table(pub_match_agency) # 3 now 2
-table(author_match_agency) # 0 now 13
+table(container_match_agency) # still 0
+table(pub_match_agency) # still 0
+table(author_match_agency) # still 0
 
 agency.pattern <- paste(agencies$Agency, collapse = "\\b|\\b")
 container_match_agency_p <- str_detect(df$container, agency.pattern)
 author_match_agency_p <- str_detect(df$author, agency.pattern)
 pub_match_agency_p <- str_detect(df$publisher, agency.pattern)
 
-table(container_match_agency_p) # 73
-table(author_match_agency_p) # 20
-table(pub_match_agency_p) # 18
+table(container_match_agency_p) # 0
+table(author_match_agency_p) # 0
+table(pub_match_agency_p) # 1
 
-#jpat <- scimago.j %>% 
-#  mutate(nwords =  str_count(title, " ")+1) %>% 
-#  filter(nwords > 2) 
-#journal.pattern <- paste(jpat$title, collapse = "|")
-#df$container_match_journal_p <- str_detect(df$container, journal.pattern)
-#df$pub_match_journal_p <- str_detect(df$container, journal.pattern)
-#
-#table(container_match_journal_p) 
-#table(pub_match_journal_p) # 20
-
-fwrite(df, "data/gsp_references.csv")
+fwrite(df, "data/trial1_references.csv")

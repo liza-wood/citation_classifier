@@ -1,8 +1,13 @@
+
 ### Function for the map function
 index.lengths <- function(x, y){
   data.frame(
     lengths = ifelse(is.na(x), 0, lengths(x)),
     ID = y)
+}
+
+yrs <- function(x){
+  trimws(str_extract(x, date.formats))
 }
 
 date.formats <- c("\\d{1,2}-\\d{1,2}-\\d{4}", # XX-XX-XXXX
@@ -17,6 +22,12 @@ date.formats <- c("\\d{1,2}-\\d{1,2}-\\d{4}", # XX-XX-XXXX
                   "(?<=\\s)\\d{4}$", # Anything before with 4 digits at the end
                   "^\\d{4}$") # Just 4 digits
 date.formats <- paste(date.formats, collapse = "|")
+
+rm.yrs <- function(x){
+  ifelse(x < 1800 | 
+           x > year(Sys.Date()), NA,
+         x)
+}
 
 assignyear <- function(x) {
   ifelse(str_detect(x,"^\\d{1,2}-\\d{1,2}-\\d{4}$"), 
@@ -86,6 +97,29 @@ collapse_title <- function(x){
     string.DT$V2[i] <- x[[i,1]]
   }
   assign("string.DT", string.DT, envir = .GlobalEnv)
+}
+
+agencies <- fread("~/Box/truckee/data/eia_data/agency_list.csv", fill = T)
+org.words <- c("Administration", "Agency", "Association", "Associates", "Authority",  "Board", "Bureau", "Center", "^Consult[a-z]+$",  "Commission", "Council",  "Department", "Foundation", "Government[s]*", "LLC",  "Forest Service", "Geological Survey", "Society", "Univeristy", "\\bU.?S.?D.?A.?", "\\bU.?S.?F.?W.?", "\\bU.?S.?G.?S.?", "\\bU.?S.?E.?P.?A.?")
+org.words <- paste(org.words, collapse = "|")
+agency.pattern <- paste(agencies$Agency, collapse = "\\b|\\b")
+
+extract.agency.titles <- function(x){
+  data.frame(
+    agency.in.title = ifelse(str_detect(x, org.words) | 
+                               str_detect(x, agency.pattern), 
+                             x, NA),
+    ID = y)
+}
+
+rm.patterns <- c("[Pp]ersonal [Cc]ommunication:?",
+                 "^\\d*$"# only digits
+)
+rm.patterns <- paste(rm.patterns, collapse = "|")
+
+rm.agency.titles <- function(x){
+  ifelse(str_detect(x, org.words) | str_detect(x, agency.pattern) |
+           str_detect(x, rm.patterns) | nchar(x) < 10 | nchar(x) > 250, NA, x)
 }
 
 collapse_container <- function(x){
