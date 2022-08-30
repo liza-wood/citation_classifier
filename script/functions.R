@@ -6,9 +6,6 @@ index.lengths <- function(x, y){
     ID = y)
 }
 
-yrs <- function(x){
-  trimws(str_extract(x, date.formats))
-}
 
 date.formats <- c("\\d{1,2}-\\d{1,2}-\\d{4}", # XX-XX-XXXX
                   "\\d{1,2}-\\d{1,2}-\\s?\\d{2}", #XX-XX- XX
@@ -23,13 +20,17 @@ date.formats <- c("\\d{1,2}-\\d{1,2}-\\d{4}", # XX-XX-XXXX
                   "^\\d{4}$") # Just 4 digits
 date.formats <- paste(date.formats, collapse = "|")
 
-rm.yrs <- function(x){
+extract_date_formats <- function(x){
+  trimws(str_extract(x, date.formats))
+}
+
+rm_yrs <- function(x){
   ifelse(x < 1800 | 
            x > year(Sys.Date()), NA,
          x)
 }
 
-assignyear <- function(x) {
+assign_year <- function(x) {
   ifelse(str_detect(x,"^\\d{1,2}-\\d{1,2}-\\d{4}$"), 
          year(as.Date(x, format = "%m-%d-%Y")),
          ifelse(str_detect(x,"^\\d{4}-\\d{1,2}-\\d{1,2}$"),
@@ -51,8 +52,105 @@ assignyear <- function(x) {
                 year(as.Date(x, format = "%Y")), "no pattern")))))))))
 }
 
+doi_url_pattern <- c("doi\\..*|doi:")
+doi_pattern <- c("10\\.\\d{1,5}.*")
+
+extract_doi_url <- function(x){
+  ifelse(str_detect(x, doi_url_pattern), str_extract(x, doi_pattern), NA)
+}
+
+rm_url_pattern <- paste(c("^[Aa]t:?\\s?", 
+                          "^[Aa]ccessed:?\\s?",
+                          "^[Ff]rom:?\\s?",
+                          "^[Ww]ebsite:?\\s?",
+                          "^https://$"),
+                        collapse = "|")
+rm_url <- function(x){
+  ifelse(str_detect(x, rm_url_pattern), str_replace(x, rm_url_pattern, NA_character_), x)
+}
+
+
+url_pattern <- paste(c("^https?:\\/\\/.*",
+                       "^ftp:\\/\\/\\.",
+                       "^www\\."), collapse = "|")
+
+keep_urls <- function(x){
+  ifelse(str_detect(x, url_pattern), x, NA_character_)
+  ifelse(str_detect(x, doi_url_pattern), NA_character_, x)
+}
+
+agencies <- fread("~/Box/truckee/data/eia_data/agency_list.csv", fill = T)
+org.words <- c("Administration", "Agency", "Association", "Associates", "Authority",  "Board", "Bureau", "Center", "^Consult[a-z]+$",  "Commission", "Council",  "Department", "Foundation", "Government[s]*", "LLC",  "Forest Service", "Geological Survey", "Society", "Univeristy")
+org.words <- paste(org.words, collapse = "|")
+agency.pattern <- paste(agencies$Agency, collapse = "\\b|\\b")
+
+#extract_agency_titles <- function(x){
+#  data.frame(
+#    agency.in.title = ifelse(str_detect(x, org.words) | 
+#                               str_detect(x, agency.pattern), 
+#                             x, NA),
+#    ID = dt[, "ID"])
+#}
+
+extract_agency_titles <- function(x){
+  ifelse(str_detect(x, org.words) | str_detect(x, agency.pattern), 
+         str_extract(x, doi_pattern), x)
+}
+
+rm_title_pattern <- paste(c("[Pp]ersonal [Cc]ommunication:?",
+                 "^\\d*$"), collapse = "|")
+
+rm_agency_titles <- function(x){
+  ifelse(str_detect(x, org.words) | str_detect(x, agency.pattern) |
+           str_detect(x, rm_title_pattern) | nchar(x) < 10 | nchar(x) > 250, NA, x)
+}
+
+extract_doi <- function(x){
+  ifelse(str_detect(x, doi_pattern), str_extract(x, doi_pattern), NA)
+}
+
+match_doi1 <- function(df){
+  doiurl <- ifelse(is.na(df[,"doiurl"]), "", df[,"doiurl"])
+  doi <- ifelse(is.na(df[,"doi"]), "", df[,"doi"])
+  df[,"doiurl"] <- ifelse(doi == doiurl, NA_character_, df[,"doiurl"])
+  df[,"doi"] <- ifelse(doi != doiurl & doiurl != "", df[,"doiurl"], df[,"doi"])
+  return(df)
+}
+
+collapse_column <- function(x, column_name){
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
+  cols <- grep(paste0(column_name, "\\d+"), colnames(x))
+  for(a in 1:nrow(x)){
+    new.cols <- 2:cols[x$lengths[a]]
+    indices.l <- c()
+    for(b in 1:length(new.cols)){
+      yr <- x[[a, new.cols[b]]]
+      indices.l[b] <- yr
+    }
+    string.dt$V1[a] <- list(c(indices.l))
+    string.dt$V2[a] <- x[[a,1]]
+  }
+  assign("string.dt", string.dt, envir = .GlobalEnv)
+}
+
 collapse_date <- function(x){
-  string.DT <- data.table(matrix(nrow = nrow(run.df), ncol = 2))
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
+  date.cols <- grep("date\\d+", colnames(x))
+  for(i in 1:nrow(x)){
+    new.date.cols <- 2:date.cols[x$lengths[i]]
+    indices.l <- c()
+    for(j in 1:length(new.date.cols)){
+      yr <- x[[i, new.date.cols[j]]]
+      indices.l[j] <- yr
+    }
+    string.dt$V1[i] <- list(c(indices.l))
+    string.dt$V2[i] <- x[[i,1]]
+  }
+  assign("string.dt", string.dt, envir = .GlobalEnv)
+}
+
+collapse_date2 <- function(x){
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
   date.cols <- grep("date\\d+", colnames(x))
   for(i in 1:nrow(x)){
     new.date.cols <- 2:date.cols[x$date.lengths[i]]
@@ -61,14 +159,30 @@ collapse_date <- function(x){
       yr <- x[[i, new.date.cols[j]]]
       indices.l[j] <- yr
     }
-    string.DT$V1[i] <- list(c(indices.l))
-    string.DT$V2[i] <- x[[i,1]]
+    string.dt$V1[i] <- list(c(indices.l))
+    string.dt$V2[i] <- x[[i,1]]
   }
-  assign("string.DT", string.DT, envir = .GlobalEnv)
+  assign("string.dt", string.dt, envir = .GlobalEnv)
 }
 
 collapse_url <- function(x){
-  string.DT <- data.table(matrix(nrow = nrow(run.df), ncol = 2))
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
+  url.cols <- grep("url\\d+", colnames(x))
+  for(i in 1:nrow(x)){
+    new.url.cols <- 2:url.cols[x$lengths[i]]
+    indices.l <- c()
+    for(j in 1:length(new.url.cols)){
+      url <- x[[i, new.url.cols[j]]]
+      indices.l[j] <- url
+    }
+    string.dt$V1[i] <- list(c(indices.l))
+    string.dt$V2[i] <- x[[i,1]]
+  }
+  assign("string.dt", string.dt, envir = .GlobalEnv)
+}
+
+collapse_url2 <- function(x){
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
   url.cols <- grep("url\\d+", colnames(x))
   for(i in 1:nrow(x)){
     new.url.cols <- 2:url.cols[x$url.lengths[i]]
@@ -77,14 +191,30 @@ collapse_url <- function(x){
       url <- x[[i, new.url.cols[j]]]
       indices.l[j] <- url
     }
-    string.DT$V1[i] <- list(c(indices.l))
-    string.DT$V2[i] <- x[[i,1]]
+    string.dt$V1[i] <- list(c(indices.l))
+    string.dt$V2[i] <- x[[i,1]]
   }
-  assign("string.DT", string.DT, envir = .GlobalEnv)
+  assign("string.dt", string.dt, envir = .GlobalEnv)
 }
 
 collapse_title <- function(x){
-  string.DT <- data.table(matrix(nrow = nrow(run.df), ncol = 2))
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
+  title.cols <- grep("title\\d+", colnames(x))
+  for(i in 1:nrow(x)){
+    new.title.cols <- 2:title.cols[x$lengths[i]]
+    indices.l <- c()
+    for(j in 1:length(new.title.cols)){
+      title <- x[[i, new.title.cols[j]]]
+      indices.l[j] <- title
+    }
+    string.dt$V1[i] <- list(c(indices.l))
+    string.dt$V2[i] <- x[[i,1]]
+  }
+  assign("string.dt", string.dt, envir = .GlobalEnv)
+}
+
+collapse_title2 <- function(x){
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
   title.cols <- grep("title\\d+", colnames(x))
   for(i in 1:nrow(x)){
     new.title.cols <- 2:title.cols[x$title.lengths[i]]
@@ -93,37 +223,15 @@ collapse_title <- function(x){
       title <- x[[i, new.title.cols[j]]]
       indices.l[j] <- title
     }
-    string.DT$V1[i] <- list(c(indices.l))
-    string.DT$V2[i] <- x[[i,1]]
+    string.dt$V1[i] <- list(c(indices.l))
+    string.dt$V2[i] <- x[[i,1]]
   }
-  assign("string.DT", string.DT, envir = .GlobalEnv)
+  assign("string.dt", string.dt, envir = .GlobalEnv)
 }
 
-agencies <- fread("~/Box/truckee/data/eia_data/agency_list.csv", fill = T)
-org.words <- c("Administration", "Agency", "Association", "Associates", "Authority",  "Board", "Bureau", "Center", "^Consult[a-z]+$",  "Commission", "Council",  "Department", "Foundation", "Government[s]*", "LLC",  "Forest Service", "Geological Survey", "Society", "Univeristy", "\\bU.?S.?D.?A.?", "\\bU.?S.?F.?W.?", "\\bU.?S.?G.?S.?", "\\bU.?S.?E.?P.?A.?")
-org.words <- paste(org.words, collapse = "|")
-agency.pattern <- paste(agencies$Agency, collapse = "\\b|\\b")
-
-extract.agency.titles <- function(x){
-  data.frame(
-    agency.in.title = ifelse(str_detect(x, org.words) | 
-                               str_detect(x, agency.pattern), 
-                             x, NA),
-    ID = y)
-}
-
-rm.patterns <- c("[Pp]ersonal [Cc]ommunication:?",
-                 "^\\d*$"# only digits
-)
-rm.patterns <- paste(rm.patterns, collapse = "|")
-
-rm.agency.titles <- function(x){
-  ifelse(str_detect(x, org.words) | str_detect(x, agency.pattern) |
-           str_detect(x, rm.patterns) | nchar(x) < 10 | nchar(x) > 250, NA, x)
-}
 
 collapse_container <- function(x){
-  string.DT <- data.table(matrix(nrow = nrow(run.df), ncol = 2))
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
   container.cols <- grep("container\\d+", colnames(x))
   for(i in 1:nrow(x)){
     new.container.cols <- 2:container.cols[x$container.lengths[i]]
@@ -132,14 +240,46 @@ collapse_container <- function(x){
       container <- x[[i, new.container.cols[j]]]
       indices.l[j] <- container
     }
-    string.DT$V1[i] <- list(c(indices.l))
-    string.DT$V2[i] <- x[[i,1]]
+    string.dt$V1[i] <- list(c(indices.l))
+    string.dt$V2[i] <- x[[i,1]]
   }
-  assign("string.DT", string.DT, envir = .GlobalEnv)
+  assign("string.dt", string.dt, envir = .GlobalEnv)
+}
+
+collapse_container2 <- function(x){
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
+  container.cols <- grep("container\\d+", colnames(x))
+  for(i in 1:nrow(x)){
+    new.container.cols <- 2:container.cols[x$lengths[i]]
+    indices.l <- c()
+    for(j in 1:length(new.container.cols)){
+      container <- x[[i, new.container.cols[j]]]
+      indices.l[j] <- container
+    }
+    string.dt$V1[i] <- list(c(indices.l))
+    string.dt$V2[i] <- x[[i,1]]
+  }
+  assign("string.dt", string.dt, envir = .GlobalEnv)
 }
 
 collapse_publisher <- function(x){
-  string.DT <- data.table(matrix(nrow = nrow(run.df), ncol = 2))
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
+  publisher.cols <- grep("publisher\\d+", colnames(x))
+  for(i in 1:nrow(x)){
+    new.publisher.cols <- 2:publisher.cols[x$lengths[i]]
+    indices.l <- c()
+    for(j in 1:length(new.publisher.cols)){
+      publisher <- x[[i, new.publisher.cols[j]]]
+      indices.l[j] <- publisher
+    }
+    string.dt$V1[i] <- list(c(indices.l))
+    string.dt$V2[i] <- x[[i,1]]
+  }
+  assign("string.dt", string.dt, envir = .GlobalEnv)
+}
+
+collapse_publisher2 <- function(x){
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
   publisher.cols <- grep("publisher\\d+", colnames(x))
   for(i in 1:nrow(x)){
     new.publisher.cols <- 2:publisher.cols[x$publisher.lengths[i]]
@@ -148,14 +288,14 @@ collapse_publisher <- function(x){
       publisher <- x[[i, new.publisher.cols[j]]]
       indices.l[j] <- publisher
     }
-    string.DT$V1[i] <- list(c(indices.l))
-    string.DT$V2[i] <- x[[i,1]]
+    string.dt$V1[i] <- list(c(indices.l))
+    string.dt$V2[i] <- x[[i,1]]
   }
-  assign("string.DT", string.DT, envir = .GlobalEnv)
+  assign("string.dt", string.dt, envir = .GlobalEnv)
 }
 
 
-author.sep <- function(x, y){
+separate_author <- function(x, y){
   author <- data.frame(x)
   #author <- lapply(author, function(x) ifelse(is.na(x), "", x))
   if(ncol(author) == 0){
@@ -271,12 +411,13 @@ author.sep <- function(x, y){
   } else {
     author.clean <- "check"
   }
-  # This is because one of the authors was named "TRUE"
+  # This is because one of the authors was named "TRUE", I think if T is name
   author.clean <- ifelse(author.clean == T, "", author.clean)
-  data.table(
-    author <- author.clean,
-    ID <- y
+  author <- data.frame(
+    "author" = author.clean,
+    "ID" = y
   )
+  return(author)
 }
 
 rm.auth.word <- c( '^[a-z]\\.\\s', # Many authors begind with a. b. or c. etc as if its a list.
@@ -334,7 +475,23 @@ rm.auth.cell <- c( "^[0-9]+$", # only digits
 rm.auth.cell <- paste(rm.auth.cell, collapse="|")
 
 collapse_author <- function(x){
-  string.DT <- data.table(matrix(nrow = nrow(run.df), ncol = 2))
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
+  author.cols <- grep("author\\d+", colnames(x))
+  for(i in 1:nrow(x)){
+    new.author.cols <- 2:author.cols[x$lengths[i]]
+    indices.l <- c()
+    for(j in 1:length(new.author.cols)){
+      yr <- x[[i, new.author.cols[j]]]
+      indices.l[j] <- yr
+    }
+    string.dt$V1[i] <- list(c(indices.l))
+    string.dt$V2[i] <- x[[i,1]]
+  }
+  assign("string.dt", string.dt, envir = .GlobalEnv)
+}
+
+collapse_author2 <- function(x){
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
   author.cols <- grep("author\\d+", colnames(x))
   for(i in 1:nrow(x)){
     new.author.cols <- 2:author.cols[x$author.lengths[i]]
@@ -343,15 +500,56 @@ collapse_author <- function(x){
       yr <- x[[i, new.author.cols[j]]]
       indices.l[j] <- yr
     }
-    string.DT$V1[i] <- list(c(indices.l))
-    string.DT$V2[i] <- x[[i,1]]
+    string.dt$V1[i] <- list(c(indices.l))
+    string.dt$V2[i] <- x[[i,1]]
   }
-  assign("string.DT", string.DT, envir = .GlobalEnv)
+  assign("string.dt", string.dt, envir = .GlobalEnv)
+}
+
+columns4fx <- columns <- c("date", "url", "title", "container", "publisher", 
+                           "doi", "author")
+reassign_value <- function(df, i){
+   if(columns4fx[i] == "date"){
+     df$date <- ifelse(df$lengths == 0, NA,
+                       ifelse(df$lengths == 1, 
+                              df[,paste0(columns4fx[i], "1")],
+                              df[,columns4fx[i]]))
+   } else if(columns4fx[i] == "url"){
+     df$url <- ifelse(df$lengths == 0, NA,
+                      ifelse(df$lengths == 1, 
+                             df[,paste0(columns4fx[i], "1")],
+                             df[,columns4fx[i]]))
+   } else if(columns4fx[i] == "title"){
+     df$title <- ifelse(df$lengths == 0, NA,
+                        ifelse(df$lengths == 1, 
+                               df[,paste0(columns4fx[i], "1")],
+                               df[,columns4fx[i]]))
+   } else if(columns4fx[i] == "container"){
+     df$container <- ifelse(df$lengths == 0, NA,
+                            ifelse(df$lengths == 1, 
+                                   df[,paste0(columns4fx[i], "1")],
+                                   df[,columns4fx[i]]))
+   } else if(columns4fx[i] == "publisher"){
+     df$pubisher <- ifelse(df$lengths == 0, NA,
+                           ifelse(df$lengths == 1, 
+                                  df[,paste0(columns4fx[i], "1")],
+                                  df[,columns4fx[i]]))
+   } else if(columns4fx[i] == "doi"){
+     df$doi <- ifelse(df$lengths == 0, NA,
+                      ifelse(df$lengths == 1, 
+                             df[,paste0(columns4fx[i], "1")],
+                             df[,columns4fx[i]]))
+   } else if(columns4fx[i] == "author"){
+     df$author <- ifelse(df$lengths == 0, NA,
+                         ifelse(df$lengths == 1, 
+                                df[,paste0(columns4fx[i], "1")],
+                                df[,columns4fx[i]]))
+   }
+  return(df)
 }
 
 
-
-matching_fx <-function(jl, pl, tl, yl, ul, dl, z) {
+matching_fx <- function(jl, pl, tl, yl, ul, dl, z) {
   data.frame(
     nested = ifelse(tl > 1 & 
                       (jl == 0) &
@@ -682,7 +880,7 @@ conference <- paste(c("[Cc]onference(?!\\sCenter)", "[Cc]onference(?!\\sHall)", 
 
 
 collapse_doi <- function(x){
-  string.DT <- data.table(matrix(nrow = nrow(run.df), ncol = 2))
+  string.dt <- data.table(matrix(nrow = nrow(x), ncol = 2))
   doi.cols <- grep("doi\\d+", colnames(x))
   for(i in 1:nrow(x)){
     new.doi.cols <- 2:doi.cols[x$doi.lengths[i]]
@@ -691,8 +889,8 @@ collapse_doi <- function(x){
       doi <- x[[i, new.doi.cols[j]]]
       indices.l[j] <- doi
     }
-    string.DT$V1[i] <- list(c(indices.l))
-    string.DT$V2[i] <- x[[i,1]]
+    string.dt$V1[i] <- list(c(indices.l))
+    string.dt$V2[i] <- x[[i,1]]
   }
-  assign("string.DT", string.DT, envir = .GlobalEnv)
+  #assign("string.dt", string.dt, envir = .GlobalEnv)
 }

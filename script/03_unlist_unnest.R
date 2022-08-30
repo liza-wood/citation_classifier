@@ -2,12 +2,16 @@
 library(stringr)
 library(data.table)
 library(tools)
-library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(magrittr)
+library(purrr)
+
 source("~/Documents/Davis/R-Projects/citation_classifier/script/functions.R")
 
 setwd("~/Box/citation_classifier/")
-anystyle <- readRDS('data/trial1_references.RDS')
-df <- anystyle %>% 
+dt <- readRDS('data/trial1_references.RDS')
+df <- dt %>% 
   rename("container" = "container-title")
 
 df <- df %>% 
@@ -137,14 +141,14 @@ df[,date.cols] <- lapply(df[,date.cols], rpl.sep)
 
 ## Isolate year only for all dates ----
 ### Have to pull out dates if they are embedded in some other weird string of numbers
-df[,date.cols] <- lapply(df[,date.cols], yrs) 
+df[,date.cols] <- lapply(df[,date.cols], extract_date_formats) 
 
 ### Pull out just year based on different date formats
-df[,date.cols] <- lapply(df[,date.cols], assignyear)
+df[,date.cols] <- lapply(df[,date.cols], assign_year)
 
 ## Additional date cleaning before nested consideration ----
 ### Remove dates that are unreasonable
-df[,date.cols] <- lapply(df[,date.cols], rm.yrs)
+df[,date.cols] <- lapply(df[,date.cols], rm_yrs)
 
 # Make numeric
 df[,date.cols] <- lapply(df[,date.cols], as.numeric)
@@ -194,7 +198,7 @@ out$date.lengths <- ifelse(is.na(out$date.lengths), length(date.cols),
 
 run.df <- out %>% filter(date.lengths > 1)
 
-string.DT <- collapse_date(run.df)
+string.DT <- collapse_date2(run.df)
 colnames(string.DT) <- c("year", "ID")
 
 # Bind back the information from out, and the year information from run.df, and assign year values for those not in run.df
@@ -345,9 +349,9 @@ df[,title.cols] <- lapply(df[,title.cols], rpl.sep)
 
 ## Additional cleaning for non-urls ----
 
-agency.titles <- data.frame(lapply(df[,title.cols], extract.agency.titles))
+agency.titles <- data.frame(lapply(df[,title.cols], extract_agency_titles))
 if(sum(!is.na(agency.titles$title1.agency.in.title)) > 0){
-  df[,title.cols] <- lapply(df[,title.cols], rm.agency.titles)
+  df[,title.cols] <- lapply(df[,title.cols], rm_agency_titles)
 }
 
 ## Removing duplicates and NAs ----
@@ -686,7 +690,7 @@ table(df$doi.lengths)
 # AUTHOR ----
 x = df$author
 y = df$ID
-out <- pmap_dfr(list(x, y), author.sep)
+out <- pmap_dfr(list(x, y), separate_author)
 
 out$V1 <- base::trimws(out$V1)
 out$V1 <- str_remove_all(out$V1, rm.auth.word)

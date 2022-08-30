@@ -1,10 +1,10 @@
 # Disambigutate journal names
 setwd("~/Box/citation_classifier/")
-df <- fread("data/gsp_references.csv")
+df <- fread("data/trial1_references.csv")
 df$container <- base::trimws(df$container)
 
 container_match_journal.o <- df$container %in% scimago.j$title
-table(container_match_journal.o) # 29
+table(container_match_journal.o) # 7
 
 ## CLEAN JOURNAL ABBREVIATIONS ----
 ### From what I can tell, gsub is slower
@@ -126,7 +126,7 @@ df$journal.disam <- str_replace(df$journal.disam, "Struct\\b", "Structural")
 # Resour. = Resources
 df$journal.disam <- str_replace(df$journal.disam, "Resour\\b", "Resources")
 # Res. = Research
-df$journal.disam <- str_replace(df$journal.disam, "Res$", "Research")
+df$journal.disam <- str_replace(df$journal.disam, "Res\\b", "Research")
 # Rev. = Review at end
 df$journal.disam <- str_replace(df$journal.disam, "Rev$", "Review")
 # Rev. = Review of
@@ -138,5 +138,6 @@ df$journal.disam <- str_replace(df$journal.disam, "Zool\\b", "Zoology")
 df$journal.disam <- trimws(df$journal.disam)
 journal_match_journal.n <- df$journal.disam %in% scimago.j$title
 table(journal_match_journal.n) # no improvement
-
+look <- select(df, container, journal.disam)
 fwrite(df, "data/gsp_references_clean.csv")
+

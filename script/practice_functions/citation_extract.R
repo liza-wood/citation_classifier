@@ -11,7 +11,7 @@
 #'
 #' @export
 
-citation_extraction <- function(doc_dir, ref_dir, layout){
+citation_extract <- function(doc_dir, ref_dir, layout){
   dir.create(ref_dir)
   already_extracted = list.files(ref_dir, full.names = T, recursive = T, pattern = 'json')
   fls = list.files(doc_dir, recursive = T, pattern = 'PDF$|pdf$', full.names = T)
